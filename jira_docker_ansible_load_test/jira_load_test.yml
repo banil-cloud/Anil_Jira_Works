@@ -1,54 +1,30 @@
 ---
-- name: Install Docker and Deploy Containers
+- name: Run Docker containers
   hosts: jiraserver
-  become: true
+  become: yes
 
   tasks:
-    - name: Check if Docker is installed
-      ansible.builtin.stat:
-        path: /usr/bin/docker
-      register: docker_check
+    - name: Step 1 - Check if Docker is installed
+      command: "docker --version"
+      ignore_errors: yes
+      register: docker_installed
 
-    - name: Install Docker
-      ansible.builtin.apt:
-        name: docker.io
-        state: present
-      when: not docker_check.stat.exists
+    - name: Step 2 - Install Docker if not installed
+      block:
+        - name: Install Docker (Ubuntu)
+          apt:
+            name: docker.io
+            state: present
+          when: docker_installed.rc != 0
 
-    - name: Start Containers
-      ansible.builtin.shell:
-        cmd: "docker run --rm -dit --name container{{ item }} --hostname container{{ item }} ubuntu:latest"
-      loop: "{{ range(1, 11) | list }}"
-      when: docker_check.stat.exists
+        - name: Start Docker service
+          systemd:
+            name: docker
+            state: started
+            enabled: yes
+          when: docker_installed.rc != 0
+      when: docker_installed.rc != 0
 
-    - name: Wait for Containers to be in running state
-      ansible.builtin.wait_for:
-        host: "docker://container{{ item }}"
-        state: started
-        timeout: 60
-      loop: "{{ range(1, 11) | list }}"
-      when: docker_check.stat.exists
-
-    - name: Copy Script to Containers
-      community.general.docker_copy:
-        src: /root/test.sh
-        dest: /tmp/create.sh
-        container: "container{{ item }}"
-      loop: "{{ range(1, 11) | list }}"
-      when: docker_check.stat.exists
-
-    - name: Set Script Permissions
-      ansible.builtin.docker_container:
-        name: "container{{ item }}"
-        command: chmod +x /tmp/create.sh
-      loop: "{{ range(1, 11) | list }}"
-      when: docker_check.stat.exists
-
-    - name: Run create.sh in all containers
-      ansible.builtin.docker_container:
-        name: "container{{ item }}"
-        command: /tmp/create.sh
-      loop: "{{ range(1, 11) | list }}"
-      when: docker_check.stat.exists
-      async: 60
-      poll: 0
+    - name: Step 3 - Run Docker containers
+      command: "docker run --rm -dit --name container{{ item }} --hostname container{{ item }} ubuntu:latest"
+      with_sequence: start=1 end=10
