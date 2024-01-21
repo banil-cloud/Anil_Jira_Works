@@ -1,0 +1,54 @@
+---
+- name: Install Docker and Deploy Containers
+  hosts: jiraserver
+  become: true
+
+  tasks:
+    - name: Check if Docker is installed
+      ansible.builtin.stat:
+        path: /usr/bin/docker
+      register: docker_check
+
+    - name: Install Docker
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+      when: not docker_check.stat.exists
+
+    - name: Start Containers
+      ansible.builtin.shell:
+        cmd: "docker run --rm -dit --name container{{ item }} --hostname container{{ item }} ubuntu:latest"
+      loop: "{{ range(1, 11) | list }}"
+      when: docker_check.stat.exists
+
+    - name: Wait for Containers to be in running state
+      ansible.builtin.wait_for:
+        host: "docker://container{{ item }}"
+        state: started
+        timeout: 60
+      loop: "{{ range(1, 11) | list }}"
+      when: docker_check.stat.exists
+
+    - name: Copy Script to Containers
+      community.general.docker_copy:
+        src: /root/test.sh
+        dest: /tmp/create.sh
+        container: "container{{ item }}"
+      loop: "{{ range(1, 11) | list }}"
+      when: docker_check.stat.exists
+
+    - name: Set Script Permissions
+      ansible.builtin.docker_container:
+        name: "container{{ item }}"
+        command: chmod +x /tmp/create.sh
+      loop: "{{ range(1, 11) | list }}"
+      when: docker_check.stat.exists
+
+    - name: Run create.sh in all containers
+      ansible.builtin.docker_container:
+        name: "container{{ item }}"
+        command: /tmp/create.sh
+      loop: "{{ range(1, 11) | list }}"
+      when: docker_check.stat.exists
+      async: 60
+      poll: 0
